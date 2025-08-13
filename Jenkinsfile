@@ -12,13 +12,14 @@ pipeline {
   }
 
   environment {
-    // Ajusta el nombre del JDK configurado en Jenkins (Global Tool Configuration)
+    // Ajusta los nombres según tus Tools en Jenkins
     JAVA_HOME = tool name: 'JDK21', type: 'hudson.model.JDK'
     PATH = "${JAVA_HOME}/bin:${env.PATH}"
-    // Si usas Maven desde Tools:
     MAVEN_HOME = tool name: 'Maven3', type: 'hudson.tasks.Maven$MavenInstallation'
     M2_HOME = "${MAVEN_HOME}"
-    DEPLOY_HOST = credentials('deploy-host') // opcional: host/usuario por credencial tipo "Username/Password"
+    // Credencial tipo Username/Password con id 'deploy-host'
+    // Esto expone DEPLOY_HOST_USR y DEPLOY_HOST_PSW en env.*
+    DEPLOY_HOST = credentials('deploy-host')
   }
 
   stages {
@@ -30,6 +31,7 @@ pipeline {
 
     stage('Build & Test') {
       steps {
+        // Usamos """ aquí porque necesitamos interpolar ${M2_HOME}
         sh """
           ${M2_HOME}/bin/mvn -B -Dmaven.test.failure.ignore=false clean verify
         """
@@ -57,19 +59,23 @@ pipeline {
     stage('Deploy to Staging') {
       when { expression { params.ENV == 'staging' } }
       steps {
-        // Requiere plugin "SSH Agent" y una credencial de tipo "SSH Username with private key" con ID: 'ssh-deploy-key'
+        // Requiere plugin "SSH Agent" y credencial SSH con id: 'ssh-deploy-key'
         sshagent(credentials: ['ssh-deploy-key']) {
-          sh '''
-            set -e
-            APP_JAR=$(ls target/*.jar | head -n1)
-            scp -o StrictHostKeyChecking=no "$APP_JAR" ${DEPLOY_HOST_USR}@${DEPLOY_HOST_PSW}:/opt/apps/myapp/app.jar
-            ssh -o StrictHostKeyChecking=no ${DEPLOY_HOST_USR}@${DEPLOY_HOST_PSW} '
-              sudo systemctl stop myapp || true
-              sudo mv /opt/apps/myapp/app.jar /opt/apps/myapp/current.jar
-              sudo systemctl start myapp
-              systemctl status myapp --no-pager -l
-            '
-          """
+          script {
+            // Construimos el host con las vars de credencial Username/Password:
+            // env.DEPLOY_HOST_USR y env.DEPLOY_HOST_PSW (usuario y host/hostname, respectivamente)
+            def host = "${env.DEPLOY_HOST_USR}@${env.DEPLOY_HOST_PSW}"
+
+            // Bloque shell con comillas simples (sin interpolación de Groovy);
+            // inyectamos 'host' por concatenación.
+            sh '''
+              set -e
+              APP_JAR=$(ls target/*.jar | head -n1)
+              echo "Subiendo: $APP_JAR"
+            '''
+            sh "scp -o StrictHostKeyChecking=no target/*.jar ${host}:/opt/apps/myapp/app.jar"
+            sh "ssh -o StrictHostKeyChecking=no ${host} 'sudo systemctl stop myapp || true; sudo mv /opt/apps/myapp/app.jar /opt/apps/myapp/current.jar || true; sudo systemctl start myapp; systemctl status myapp --no-pager -l'"
+          }
         }
       }
     }
