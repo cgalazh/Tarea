@@ -59,7 +59,7 @@ pipeline {
       steps {
         // Requiere plugin "SSH Agent" y una credencial de tipo "SSH Username with private key" con ID: 'ssh-deploy-key'
         sshagent(credentials: ['ssh-deploy-key']) {
-          sh """
+          sh '''
             set -e
             APP_JAR=$(ls target/*.jar | head -n1)
             scp -o StrictHostKeyChecking=no "$APP_JAR" ${DEPLOY_HOST_USR}@${DEPLOY_HOST_PSW}:/opt/apps/myapp/app.jar
