@@ -3,7 +3,6 @@ pipeline {
 
   options {
     timestamps()
-    ansiColor('xterm')
     buildDiscarder(logRotator(numToKeepStr: '15'))
   }
 
@@ -12,35 +11,25 @@ pipeline {
   }
 
   environment {
-    // Ajusta los nombres según tus Tools en Jenkins
     JAVA_HOME = tool name: 'JDK21', type: 'hudson.model.JDK'
     PATH = "${JAVA_HOME}/bin:${env.PATH}"
     MAVEN_HOME = tool name: 'Maven3', type: 'hudson.tasks.Maven$MavenInstallation'
     M2_HOME = "${MAVEN_HOME}"
-    // Credencial tipo Username/Password con id 'deploy-host'
-    // Esto expone DEPLOY_HOST_USR y DEPLOY_HOST_PSW en env.*
-    DEPLOY_HOST = credentials('deploy-host')
+    DEPLOY_HOST = credentials('deploy-host') // Username/Password → crea env.DEPLOY_HOST_USR/PSW
   }
 
   stages {
     stage('Checkout') {
-      steps {
-        checkout scm
-      }
+      steps { checkout scm }
     }
 
     stage('Build & Test') {
       steps {
-        // Usamos """ aquí porque necesitamos interpolar ${M2_HOME}
         sh """
           ${M2_HOME}/bin/mvn -B -Dmaven.test.failure.ignore=false clean verify
         """
       }
-      post {
-        always {
-          junit 'target/surefire-reports/*.xml'
-        }
-      }
+      post { always { junit 'target/surefire-reports/*.xml' } }
     }
 
     stage('Package') {
@@ -49,25 +38,15 @@ pipeline {
           ${M2_HOME}/bin/mvn -B package -DskipTests
         """
       }
-      post {
-        success {
-          archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-        }
-      }
+      post { success { archiveArtifacts artifacts: 'target/*.jar', fingerprint: true } }
     }
 
     stage('Deploy to Staging') {
       when { expression { params.ENV == 'staging' } }
       steps {
-        // Requiere plugin "SSH Agent" y credencial SSH con id: 'ssh-deploy-key'
         sshagent(credentials: ['ssh-deploy-key']) {
           script {
-            // Construimos el host con las vars de credencial Username/Password:
-            // env.DEPLOY_HOST_USR y env.DEPLOY_HOST_PSW (usuario y host/hostname, respectivamente)
             def host = "${env.DEPLOY_HOST_USR}@${env.DEPLOY_HOST_PSW}"
-
-            // Bloque shell con comillas simples (sin interpolación de Groovy);
-            // inyectamos 'host' por concatenación.
             sh '''
               set -e
               APP_JAR=$(ls target/*.jar | head -n1)
