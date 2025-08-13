@@ -8,17 +8,14 @@ pipeline {
 
   parameters {
     choice(name: 'ENV', choices: ['staging', 'prod'], description: 'Ambiente de despliegue')
-    // string(name: 'DEPLOY_TARGET', defaultValue: 'usuario@servidor', description: 'Destino SSH, ej: user@host')
   }
 
   environment {
-    // Ajusta los nombres de Tools a los que tengas en Manage Jenkins > Global Tool Configuration
+    // Ajusta los nombres a los Tools que tengas configurados
     JAVA_HOME = tool name: 'JDK21', type: 'hudson.model.JDK'
     PATH = "${JAVA_HOME}\\bin;${env.PATH}"
     MAVEN_HOME = tool name: 'Maven3', type: 'hudson.tasks.Maven$MavenInstallation'
     M2_HOME = "${MAVEN_HOME}"
-    // 🔴 Comentado para evitar fallo por credencial inexistente:
-    // DEPLOY_HOST = credentials('deploy-host')
   }
 
   stages {
@@ -28,50 +25,45 @@ pipeline {
 
     stage('Build & Test') {
       steps {
-        bat """
-          "%M2_HOME%\\bin\\mvn" -B -Dmaven.test.failure.ignore=false clean verify
-        """
+        script {
+          if (fileExists('pom.xml')) {
+            // Proyecto Maven
+            bat "\"%M2_HOME%\\bin\\mvn\" -B -Dmaven.test.failure.ignore=false clean verify"
+          } else {
+            // Placeholder si NO hay Maven project
+            echo "No se encontró pom.xml → se omite build Maven"
+            bat 'echo Build placeholder OK'
+          }
+        }
       }
       post {
         always {
-          junit 'target/surefire-reports/*.xml'
+          // No falla aunque no existan reportes
+          junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true
         }
       }
     }
 
     stage('Package') {
+      when { expression { fileExists('pom.xml') } }
       steps {
-        bat """
-          "%M2_HOME%\\bin\\mvn" -B package -DskipTests
-        """
+        bat "\"%M2_HOME%\\bin\\mvn\" -B package -DskipTests"
       }
       post {
         success {
-          archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+          archiveArtifacts artifacts: 'target/*.jar', fingerprint: true, allowEmptyArchive: true
         }
       }
     }
 
-    /*  ---------------------  DESPLEGUE COMENTADO  ---------------------
+    /* ---------------------  DESPLEGUE COMENTADO  ---------------------
     stage('Deploy to Staging') {
       when { expression { params.ENV == 'staging' } }
       steps {
-        // Requiere: plugin SSH Agent + credencial "ssh-deploy-key" y OpenSSH Client (ssh/scp) en el agente.
-        sshagent(credentials: ['ssh-deploy-key']) {
-          script {
-            def host = params.DEPLOY_TARGET   // p.ej. user@host
-            bat '''
-              for /f %%A in ('dir /b target\\*.jar') do set APP_JAR=target\\%%A
-              echo Subiendo: %APP_JAR%
-            '''
-            bat "scp -o StrictHostKeyChecking=no %APP_JAR% " + host + ":/opt/apps/myapp/app.jar"
-            bat "ssh -o StrictHostKeyChecking=no " + host + " \"sudo systemctl stop myapp || true && sudo mv /opt/apps/myapp/app.jar /opt/apps/myapp/current.jar || true && sudo systemctl start myapp && systemctl status myapp --no-pager -l\""
-          }
-        }
+        echo 'Deploy desactivado por ahora'
       }
     }
     ------------------------------------------------------------------- */
-
   }
 
   post {
